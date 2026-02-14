@@ -1,0 +1,14 @@
+services:
+  panchobot:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    ports:
+      - "8787:8787"
+    environment:
+      - BIND_HOST=127.0.0.1
+      - PORT=8787
+      - DB_PATH=/app/data/pancho.db
+      - RELAYS_ALLOWLIST=wss://relay.damus.io,wss://nos.lol
+    volumes:
+      - ../data:/app/data
