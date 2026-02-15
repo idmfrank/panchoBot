@@ -1,69 +1,42 @@
-# PanchoBot MVP 0
+# PanchoBot MVP 0 — Local Agent Runtime (Security First)
 
-PanchoBot is a **local-only FastAPI service** that publishes **Nostr kind 1 notes** using a strict human-controlled workflow:
+PanchoBot is an OpenClaw-like local runtime where the model provides planning intelligence and the runtime controls execution.
 
-`PROPOSED -> APPROVED -> EXECUTED`
+## What this is
 
-It includes:
-- AI-assisted drafting (`POST /ai/draft`) with strict draft-only guardrails
-- Canonical JSON hashing (SHA-256)
-- TTL enforcement at proposal and approval stages
-- NIP-07/Nostr Schnorr signature verification for approval and note events
-- Relay allowlist enforcement
-- Audit log trail for transitions
+- **Planner (AI):** proposes a plan and candidate tool calls.
+- **Executor (control plane):** validates tool names and schemas, enforces policy constraints, generates previews, and gates privileged execution behind explicit approval.
+- **Local-first:** FastAPI + SQLite + static web UI, no cloud requirement.
 
-## Security model
+## Threat model summary
 
-### Allowed capability
-- Publish Nostr **kind 1** text notes only.
+MVP 0 assumes planner output is untrusted and can be malicious or incorrect. The control plane therefore:
 
-### Explicitly disallowed
-- Autonomous execution
-- Non-note actions (DMs, deletes, follows, reactions)
-- Key custody
-- Cloud-first behavior
+- denies unknown tools,
+- validates tool args against schemas,
+- enforces workspace path allowlists and shell command allowlists,
+- requires explicit approval for privileged actions,
+- uses time-based, single-use approvals bound to canonical action payload hashes.
 
-### Workflow guarantees
-1. **Propose** creates immutable payload + hash and `PROPOSED` state.
-2. **Approve** requires signed approval event (`kind 27235`) binding `{action_id, action_hash}` and signed note event matching the proposed payload.
-3. **Execute** publishes only approved note event to allowlisted relays.
+## Security guarantees
 
-State transitions are strict and terminal (`EXECUTED` / `EXPIRED`).
+- **Least privilege + deny-by-default:** only registered tools can run.
+- **Approval gating:** privileged tools (`workspace.write_file`, `shell.run_allowlisted`) require approval before execution.
+- **TTL + single-use approvals:** approvals expire and can only be consumed once.
+- **Canonical hash binding:** approvals must match `action_hash = sha256(canonical_json(payload))`.
+- **Auditability:** action transitions and execution are recorded in `audit_log`.
 
-## API
+## Tools in MVP 0
 
-### `POST /ai/draft`
-Generate a draft only. This endpoint cannot execute actions.
+### SAFE
+- `agent.explain_plan`
+- `workspace.read_file` (workspace allowlist + read size limit)
 
-Request:
-```json
-{"prompt": "write a short update about shipping MVP 0"}
-```
+### PRIVILEGED
+- `workspace.write_file` (workspace allowlist)
+- `shell.run_allowlisted` (`ls`, `pwd`, `cat`, `pytest`; blocks pipes, redirects, env expansion)
 
-Response:
-```json
-{
-  "draft": "...",
-  "guardrails": {
-    "can_execute_actions": false,
-    "scope": "draft-only"
-  }
-}
-```
-
-### `POST /actions/propose`
-Create a proposed publish action.
-
-### `POST /actions/approve`
-Approve a proposed action with Nostr-signed approval + note event.
-
-### `POST /actions/execute`
-Publish an approved action once.
-
-### `GET /actions/{action_id}/audit`
-Return audit entries for the action.
-
-## Local run (Ubuntu / venv)
+## Run locally (venv)
 
 ```bash
 python3 -m venv .venv
@@ -72,36 +45,28 @@ pip install -r requirements.txt
 uvicorn server.main:app --host 127.0.0.1 --port 8787
 ```
 
-Open `http://127.0.0.1:8787`.
+Open: `http://127.0.0.1:8787`
 
-## Docker
+## Run with Docker
 
 ```bash
 cd docker
 docker compose up --build
 ```
 
-Service is available on `http://127.0.0.1:8787` from the host.
-
-## Configuration
-
-- `RELAYS_ALLOWLIST` (comma-separated relay URLs)
-- `PROPOSE_TTL_SECONDS` (default `300`)
-- `APPROVAL_TTL_SECONDS` (default `120`)
-- `MAX_CONTENT_LEN` (default `1000`)
-- `BIND_HOST` (default `127.0.0.1`)
-- `PORT` (default `8787`)
-- `DB_PATH` (default `./data/pancho.db`)
-
-## Tests
+## Run tests
 
 ```bash
 pytest -q
 ```
 
-Test suite includes:
-- canonical hash and Schnorr verification tests
-- strict state machine tests
-- AI draft tests with deterministic fake AI client
-- integration flow with mocked relay publisher
+## Demo script (2–3 minutes)
 
+1. `docker compose up`
+2. Open `http://127.0.0.1:8787`
+3. Goal: `Create a README in workspace describing this project`
+4. Click **Plan** and inspect proposed preview.
+5. Click **Approve**, verify status becomes `APPROVED` and TTL countdown appears.
+6. Click **Execute**, verify file is written and status is `EXECUTED`.
+7. Try **Execute** again, verify failure (single use).
+8. Open action details and inspect audit log entries.

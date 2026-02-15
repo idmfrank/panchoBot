@@ -6,9 +6,10 @@ services:
     ports:
       - "8787:8787"
     environment:
-      - BIND_HOST=127.0.0.1
+      - BIND_HOST=0.0.0.0
       - PORT=8787
       - DB_PATH=/app/data/pancho.db
-      - RELAYS_ALLOWLIST=wss://relay.damus.io,wss://nos.lol
+      - WORKSPACE_DIR=/app/workspace
     volumes:
       - ../data:/app/data
+      - ../workspace:/app/workspace
