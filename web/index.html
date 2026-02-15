@@ -1,14 +1,25 @@
 <!doctype html>
 <html>
-<head><meta charset="utf-8"><title>PanchoBot</title></head>
+<head>
+  <meta charset="utf-8">
+  <title>PanchoBot MVP 0</title>
+  <style>
+    body { font-family: sans-serif; max-width: 900px; margin: 20px auto; }
+    textarea { width: 100%; height: 90px; }
+    .action { border: 1px solid #ddd; padding: 10px; margin: 10px 0; }
+    pre { background: #f6f6f6; padding: 8px; overflow-x: auto; }
+  </style>
+</head>
 <body>
-  <h2>PanchoBot MVP 0</h2>
-  <label>Pubkey <input id="pubkey" size="70"></label><br>
-  <textarea id="content" rows="4" cols="70" placeholder="Note content"></textarea><br>
-  <button id="propose">Propose</button>
-  <button id="approve">Approve</button>
-  <button id="execute">Execute</button>
-  <pre id="out"></pre>
-  <script src="/web/app.js"></script>
+  <h1>PanchoBot MVP 0</h1>
+  <p>Security-first local runtime: plan, preview, approve, execute.</p>
+  <textarea id="goal" placeholder="What do you want to do?"></textarea>
+  <br />
+  <button id="planBtn">Plan</button>
+  <h3>Plan Summary</h3>
+  <div id="planSummary"></div>
+  <h3>Actions</h3>
+  <div id="actions"></div>
+  <script src="/app.js"></script>
 </body>
 </html>

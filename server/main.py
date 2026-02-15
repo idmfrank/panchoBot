@@ -1,25 +1,85 @@
 from pathlib import Path
 
-from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
+from fastapi import FastAPI, Header
 from fastapi.responses import FileResponse, JSONResponse
-from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from .actions import ActionError, ActionService
-from .ai import AIDraftService, RuleBasedDraftAIClient
-from .config import load_settings
-from .nostr_pub import RelayPublisher
+from .agent import AgentPlanner
+from .ai.fake_client import FakeAIClient
+from .ai.openai_client import OpenAIClient
+from .config import ensure_directories, load_settings
+from .registry import RiskTier, Tool, ToolRegistry
 from .storage import Storage
+from .tools.shell import ShellArgs, ShellPolicy, ShellTool
+from .tools.workspace import ReadFileArgs, WorkspacePolicy, WorkspaceTools, WriteFileArgs, read_file_preview, write_file_preview
 
 settings = load_settings()
+ensure_directories(settings)
 storage = Storage(settings.db_path)
-publisher = RelayPublisher()
-service = ActionService(storage, settings, publisher)
-ai_service = AIDraftService(RuleBasedDraftAIClient(max_len=settings.max_content_len), settings.max_content_len)
+registry = ToolRegistry()
+workspace_tools = WorkspaceTools(WorkspacePolicy(settings.workspace_dir, settings.max_read_bytes))
+shell_tool = ShellTool(ShellPolicy(settings.workspace_dir, settings.allowed_shell_commands))
 
-app = FastAPI(title="PanchoBot MVP0")
-app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
+
+class ExplainPlanArgs(BaseModel):
+    plan: str
+
+
+def explain_plan_preview(args: ExplainPlanArgs) -> str:
+    return f"Explain plan text: {args.plan[:120]}"
+
+
+def explain_plan_execute(args: ExplainPlanArgs) -> dict:
+    return {"summary": f"Plan: {args.plan}"}
+
+
+registry.register(
+    Tool(
+        name="agent.explain_plan",
+        description="Explain planner output in concise human language",
+        input_schema=ExplainPlanArgs,
+        risk_tier=RiskTier.SAFE,
+        preview=explain_plan_preview,
+        execute=explain_plan_execute,
+    )
+)
+registry.register(
+    Tool(
+        name="workspace.read_file",
+        description="Read text file inside local workspace",
+        input_schema=ReadFileArgs,
+        risk_tier=RiskTier.SAFE,
+        preview=read_file_preview,
+        execute=workspace_tools.read_file,
+    )
+)
+registry.register(
+    Tool(
+        name="workspace.write_file",
+        description="Write text file inside local workspace",
+        input_schema=WriteFileArgs,
+        risk_tier=RiskTier.PRIVILEGED,
+        preview=write_file_preview,
+        execute=workspace_tools.write_file,
+    )
+)
+registry.register(
+    Tool(
+        name="shell.run_allowlisted",
+        description="Run allowlisted shell command in workspace",
+        input_schema=ShellArgs,
+        risk_tier=RiskTier.PRIVILEGED,
+        preview=shell_tool.preview,
+        execute=shell_tool.execute,
+    )
+)
+
+action_service = ActionService(storage, registry, settings.action_ttl_seconds, settings.approval_ttl_seconds)
+ai_client = OpenAIClient(settings.openai_api_key, settings.openai_model) if settings.openai_api_key else FakeAIClient()
+planner = AgentPlanner(ai_client, action_service)
+
+app = FastAPI(title="PanchoBot MVP 0")
 
 
 @app.exception_handler(ActionError)
@@ -27,56 +87,46 @@ def action_error_handler(_, exc: ActionError):
     return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
 
 
-class DraftReq(BaseModel):
-    prompt: str = Field(min_length=1, max_length=4000)
+class PlanRequest(BaseModel):
+    goal: str = Field(min_length=1)
 
 
-class ProposeReq(BaseModel):
-    content: str
-    pubkey: str = Field(min_length=64, max_length=64)
-    tags: list = []
-    relays: list[str] | None = None
-
-
-class ApproveReq(BaseModel):
-    action_id: str
-    approval_event: dict
-    note_event: dict
-
-
-class ExecuteReq(BaseModel):
+class ApproveRequest(BaseModel):
     action_id: str
 
 
-@app.post("/ai/draft")
-def ai_draft(req: DraftReq):
-    return ai_service.generate_draft(req.prompt)
+class ExecuteRequest(BaseModel):
+    action_id: str
 
 
-@app.post("/actions/propose")
-def propose(req: ProposeReq):
-    return service.propose(req.content, req.tags, req.relays, req.pubkey)
+@app.post("/agent/plan")
+def agent_plan(req: PlanRequest, x_session_id: str = Header(default="local-session")):
+    return planner.plan(req.goal, x_session_id)
 
 
 @app.post("/actions/approve")
-def approve(req: ApproveReq):
-    return service.approve(req.action_id, req.approval_event, req.note_event)
+def approve(req: ApproveRequest):
+    return action_service.approve(req.action_id)
 
 
 @app.post("/actions/execute")
-async def execute(req: ExecuteReq):
-    return await service.execute(req.action_id)
+def execute(req: ExecuteRequest):
+    return action_service.execute(req.action_id)
 
 
-@app.get("/actions/{action_id}/audit")
-def audit(action_id: str):
-    return {"entries": storage.list_audit(action_id)}
+@app.get("/actions/{action_id}")
+def action_detail(action_id: str):
+    return action_service.get_action_detail(action_id)
 
 
 web_dir = Path(__file__).resolve().parent.parent / "web"
-app.mount("/web", StaticFiles(directory=web_dir), name="web")
 
 
 @app.get("/")
 def index():
     return FileResponse(web_dir / "index.html")
+
+
+@app.get("/app.js")
+def app_js():
+    return FileResponse(web_dir / "app.js")

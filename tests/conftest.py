@@ -1,59 +1,39 @@
-import asyncio
-import json
-import time
-
-import pytest
 from fastapi.testclient import TestClient
+import pytest
 
+from server import main
 from server.actions import ActionService
-from server.ai import AIDraftService
-from server.config import Settings
-from server.crypto import sign_event_for_testing
-from server.main import app
-from server.nostr_pub import RelayPublisher
+from server.agent import AgentPlanner
+from server.ai.fake_client import FakeAIClient
+from server.config import Settings, ensure_directories
+from server.registry import RiskTier, Tool, ToolRegistry
 from server.storage import Storage
-
-TEST_SECRET = "1" * 64
-ALT_SECRET = "2" * 64
-
-
-class MockPublisher(RelayPublisher):
-    async def publish_event(self, event, relays):
-        return [{"relay_url": r, "success": True, "response": "ok"} for r in relays]
+from server.tools.shell import ShellArgs, ShellPolicy, ShellTool
+from server.tools.workspace import ReadFileArgs, WorkspacePolicy, WorkspaceTools, WriteFileArgs, read_file_preview, write_file_preview
 
 
-class DeterministicAIClient:
-    def draft(self, prompt: str) -> str:
-        return f"DRAFT::{prompt.strip().upper()}"
+class ExplainPlanArgs(main.ExplainPlanArgs):
+    pass
 
 
 @pytest.fixture
-def service(tmp_path):
-    settings = Settings(relays_allowlist=["wss://relay.damus.io", "wss://nos.lol"], db_path=str(tmp_path / "test.db"))
-    return ActionService(Storage(settings.db_path), settings, MockPublisher())
+def app_client(tmp_path):
+    settings = Settings(db_path=str(tmp_path / "test.db"), workspace_dir=str(tmp_path / "workspace"), action_ttl_seconds=5, approval_ttl_seconds=5)
+    ensure_directories(settings)
+    storage = Storage(settings.db_path)
+    registry = ToolRegistry()
+    ws = WorkspaceTools(WorkspacePolicy(settings.workspace_dir, settings.max_read_bytes))
+    sh = ShellTool(ShellPolicy(settings.workspace_dir, settings.allowed_shell_commands))
 
+    registry.register(Tool("agent.explain_plan", "", ExplainPlanArgs, RiskTier.SAFE, main.explain_plan_preview, main.explain_plan_execute))
+    registry.register(Tool("workspace.read_file", "", ReadFileArgs, RiskTier.SAFE, read_file_preview, ws.read_file))
+    registry.register(Tool("workspace.write_file", "", WriteFileArgs, RiskTier.PRIVILEGED, write_file_preview, ws.write_file))
+    registry.register(Tool("shell.run_allowlisted", "", ShellArgs, RiskTier.PRIVILEGED, sh.preview, sh.execute))
 
-@pytest.fixture
-def client(tmp_path):
-    from server import main
-
-    settings = Settings(relays_allowlist=["wss://relay.damus.io", "wss://nos.lol"], db_path=str(tmp_path / "api.db"))
     main.settings = settings
-    main.storage = Storage(settings.db_path)
-    main.publisher = MockPublisher()
-    main.service = ActionService(main.storage, settings, main.publisher)
-    main.ai_service = AIDraftService(DeterministicAIClient(), settings.max_content_len)
-    return TestClient(app)
-
-
-def sign_event(secret_hex: str, event: dict):
-    base = {"tags": [], "created_at": int(time.time()), **event}
-    return sign_event_for_testing(secret_hex, base)
-
-
-def approval_content(action_id: str, action_hash: str) -> str:
-    return json.dumps({"action_id": action_id, "action_hash": action_hash}, separators=(",", ":"))
-
-
-def run(coro):
-    return asyncio.run(coro)
+    main.storage = storage
+    main.registry = registry
+    main.action_service = ActionService(storage, registry, settings.action_ttl_seconds, settings.approval_ttl_seconds)
+    main.planner = AgentPlanner(FakeAIClient(), main.action_service)
+    client = TestClient(main.app)
+    return client, settings, main.action_service
