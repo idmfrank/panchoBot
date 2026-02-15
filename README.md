@@ -1,81 +1,107 @@
 # PanchoBot MVP 0
 
-PanchoBot is a local-first FastAPI service for controlled Nostr publication (`kind:1`) with explicit human approval, TTL windows, and single-use execution.
+PanchoBot is a **local-only FastAPI service** that publishes **Nostr kind 1 notes** using a strict human-controlled workflow:
 
-## Threat model summary
-- Payload tampering between preview and publish
-- Replay of approvals
-- Unauthorized execution
-- Relay egress abuse
-- Expired approval reuse
+`PROPOSED -> APPROVED -> EXECUTED`
 
-## Security guarantees
-- Deterministic state machine: `PROPOSED -> APPROVED -> EXECUTED`
-- SHA-256 canonical payload hash binding
-- Approval must include `action_id` + `action_hash`
-- Approval and note signatures verified server-side (Schnorr)
-- Single-use execution lock (`EXECUTED` terminal)
-- TTL checks at approval and execution
-- Relay allowlist enforced
-- Audit logging for all transitions
-- Binds locally by default (`127.0.0.1`)
+It includes:
+- AI-assisted drafting (`POST /ai/draft`) with strict draft-only guardrails
+- Canonical JSON hashing (SHA-256)
+- TTL enforcement at proposal and approval stages
+- NIP-07/Nostr Schnorr signature verification for approval and note events
+- Relay allowlist enforcement
+- Audit log trail for transitions
 
-## What it does **not** do
-- No DMs/reactions/follows/deletes
-- No key storage/custody
-- No autonomous execution
-- No cloud deployment
+## Security model
 
-## Local run (venv)
+### Allowed capability
+- Publish Nostr **kind 1** text notes only.
+
+### Explicitly disallowed
+- Autonomous execution
+- Non-note actions (DMs, deletes, follows, reactions)
+- Key custody
+- Cloud-first behavior
+
+### Workflow guarantees
+1. **Propose** creates immutable payload + hash and `PROPOSED` state.
+2. **Approve** requires signed approval event (`kind 27235`) binding `{action_id, action_hash}` and signed note event matching the proposed payload.
+3. **Execute** publishes only approved note event to allowlisted relays.
+
+State transitions are strict and terminal (`EXECUTED` / `EXPIRED`).
+
+## API
+
+### `POST /ai/draft`
+Generate a draft only. This endpoint cannot execute actions.
+
+Request:
+```json
+{"prompt": "write a short update about shipping MVP 0"}
+```
+
+Response:
+```json
+{
+  "draft": "...",
+  "guardrails": {
+    "can_execute_actions": false,
+    "scope": "draft-only"
+  }
+}
+```
+
+### `POST /actions/propose`
+Create a proposed publish action.
+
+### `POST /actions/approve`
+Approve a proposed action with Nostr-signed approval + note event.
+
+### `POST /actions/execute`
+Publish an approved action once.
+
+### `GET /actions/{action_id}/audit`
+Return audit entries for the action.
+
+## Local run (Ubuntu / venv)
+
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
 uvicorn server.main:app --host 127.0.0.1 --port 8787
 ```
+
 Open `http://127.0.0.1:8787`.
 
-## Local run (Docker)
+## Docker
+
 ```bash
 cd docker
 docker compose up --build
 ```
 
-## Run tests
-```bash
-pytest -q
-```
-
-## Example curl commands
-```bash
-curl -sX POST http://127.0.0.1:8787/actions/propose \
-  -H 'content-type: application/json' \
-  -d '{"content":"hello from curl","pubkey":"<64-hex-pubkey>","tags":[]}'
-
-curl -sX POST http://127.0.0.1:8787/actions/approve \
-  -H 'content-type: application/json' \
-  -d '{"action_id":"<id>","approval_event":{...},"note_event":{...}}'
-
-curl -sX POST http://127.0.0.1:8787/actions/execute \
-  -H 'content-type: application/json' \
-  -d '{"action_id":"<id>"}'
-```
-
-## Demo walkthrough
-1. Start stack (`docker compose up`).
-2. Open `http://127.0.0.1:8787`.
-3. Enter `pubkey` and content, click **Propose**.
-4. Review preview + hash + expiry.
-5. Click **Approve** (NIP-07 prompt).
-6. Click **Execute**.
-7. Try **Execute** again (fails by design).
-8. Check `GET /actions/{action_id}/audit`.
+Service is available on `http://127.0.0.1:8787` from the host.
 
 ## Configuration
-- `RELAYS_ALLOWLIST` (comma-separated)
+
+- `RELAYS_ALLOWLIST` (comma-separated relay URLs)
 - `PROPOSE_TTL_SECONDS` (default `300`)
 - `APPROVAL_TTL_SECONDS` (default `120`)
 - `MAX_CONTENT_LEN` (default `1000`)
 - `BIND_HOST` (default `127.0.0.1`)
 - `PORT` (default `8787`)
 - `DB_PATH` (default `./data/pancho.db`)
+
+## Tests
+
+```bash
+pytest -q
+```
+
+Test suite includes:
+- canonical hash and Schnorr verification tests
+- strict state machine tests
+- AI draft tests with deterministic fake AI client
+- integration flow with mocked relay publisher
+

@@ -3,19 +3,24 @@ import time
 import pytest
 
 from server.actions import ActionError
-from tests.conftest import run, sign_event
+from tests.conftest import TEST_SECRET, approval_content, run, sign_event
 
 
-def approve_action(service, pubkey="c" * 64):
+def approve_action(service):
+    pubkey = sign_event(TEST_SECRET, {"kind": 1, "content": "x"})["pubkey"]
     p = service.propose("hello", [], None, pubkey)
-    note = sign_event(pubkey, {"kind":1,"created_at":p["action_payload"]["created_at"],"tags":[],"content":"hello"})
-    approval = sign_event(pubkey, {"kind":27235,"created_at":int(time.time()),"tags":[],"content":f'{{"action_id":"{p["action_id"]}","action_hash":"{p["action_hash"]}"}}'})
+    note = sign_event(TEST_SECRET, {"kind": 1, "created_at": p["action_payload"]["created_at"], "tags": [], "content": "hello"})
+    approval = sign_event(
+        TEST_SECRET,
+        {"kind": 27235, "created_at": int(time.time()), "tags": [], "content": approval_content(p["action_id"], p["action_hash"])},
+    )
     service.approve(p["action_id"], approval, note)
     return p["action_id"]
 
 
 def test_execute_without_approval_fails(service):
-    p = service.propose("hello", [], None, "c" * 64)
+    pubkey = sign_event(TEST_SECRET, {"kind": 1, "content": "x"})["pubkey"]
+    p = service.propose("hello", [], None, pubkey)
     with pytest.raises(ActionError):
         run(service.execute(p["action_id"]))
 
@@ -29,10 +34,14 @@ def test_double_execute_fails(service):
 
 def test_expired_proposal_cannot_be_approved(service):
     service.settings.propose_ttl_seconds = 1
-    p = service.propose("hello", [], None, "c" * 64)
+    pubkey = sign_event(TEST_SECRET, {"kind": 1, "content": "x"})["pubkey"]
+    p = service.propose("hello", [], None, pubkey)
     time.sleep(2)
-    note = sign_event("c" * 64, {"kind":1,"created_at":p["action_payload"]["created_at"],"tags":[],"content":"hello"})
-    approval = sign_event("c" * 64, {"kind":27235,"created_at":int(time.time()),"tags":[],"content":f'{{"action_id":"{p["action_id"]}","action_hash":"{p["action_hash"]}"}}'})
+    note = sign_event(TEST_SECRET, {"kind": 1, "created_at": p["action_payload"]["created_at"], "tags": [], "content": "hello"})
+    approval = sign_event(
+        TEST_SECRET,
+        {"kind": 27235, "created_at": int(time.time()), "tags": [], "content": approval_content(p["action_id"], p["action_hash"])},
+    )
     with pytest.raises(ActionError):
         service.approve(p["action_id"], approval, note)
 
