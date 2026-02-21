@@ -47,11 +47,11 @@ uvicorn server.main:app --host 127.0.0.1 --port 8787
 
 Open: `http://127.0.0.1:8787`
 
-## Run with Docker
+## Run with Podman
 
 ```bash
-cd docker
-docker compose up --build
+cd podman
+podman compose up --build
 ```
 
 ## Run tests
@@ -62,7 +62,7 @@ pytest -q
 
 ## Demo script (2–3 minutes)
 
-1. `docker compose up`
+1. `podman compose up`
 2. Open `http://127.0.0.1:8787`
 3. Goal: `Create a README in workspace describing this project`
 4. Click **Plan** and inspect proposed preview.

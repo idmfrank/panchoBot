@@ -2,7 +2,7 @@ services:
   panchobot:
     build:
       context: ..
-      dockerfile: docker/Dockerfile
+      dockerfile: podman/Containerfile
     ports:
       - "8787:8787"
     environment:
@@ -11,5 +11,5 @@ services:
       - DB_PATH=/app/data/pancho.db
       - WORKSPACE_DIR=/app/workspace
     volumes:
-      - ../data:/app/data
-      - ../workspace:/app/workspace
+      - ../data:/app/data:Z
+      - ../workspace:/app/workspace:Z
