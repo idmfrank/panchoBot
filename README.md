@@ -1,12 +1,35 @@
-# PanchoBot MVP 0 — Local Agent Runtime (Security First)
+## PanchoBot Lite — Python Local Agent Runtime (OpenClaw-style)
 
-PanchoBot is an OpenClaw-like local runtime where the model provides planning intelligence and the runtime controls execution.
+PanchoBot Lite is a lightweight, OpenClaw-style local runtime written in Python. The model provides planning intelligence while the runtime remains the control plane for tool execution and policy enforcement.
 
 ## What this is
 
 - **Planner (AI):** proposes a plan and candidate tool calls.
 - **Executor (control plane):** validates tool names and schemas, enforces policy constraints, generates previews, and gates privileged execution behind explicit approval.
 - **Local-first:** FastAPI + SQLite + static web UI, no cloud requirement.
+
+
+## OpenAI API key via Linux secure storage (recommended)
+
+PanchoBot Lite supports reading your OpenAI API key from the Linux system keyring (Secret Service/libsecret via `keyring`) so you do not need to keep the key in shell history or plaintext dotfiles.
+
+Store the key:
+
+```bash
+python -m keyring set panchobot openai
+```
+
+Then start the server normally. At runtime the key is resolved in this order:
+
+1. `OPENAI_API_KEY` environment variable (explicit override)
+2. Linux keyring entry: service `panchobot`, username `openai`
+
+You can customize keyring lookup with:
+
+- `OPENAI_KEYRING_SERVICE`
+- `OPENAI_KEYRING_USERNAME`
+
+If no key is found, PanchoBot Lite falls back to the local `FakeAIClient`.
 
 ## Threat model summary
 

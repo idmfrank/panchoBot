@@ -13,6 +13,8 @@ class Settings:
     workspace_dir: str = "./workspace"
     max_read_bytes: int = 65536
     openai_api_key: str | None = None
+    openai_keyring_service: str = "panchobot"
+    openai_keyring_username: str = "openai"
     openai_model: str = "gpt-4o-mini"
     allowed_shell_commands: list[str] = field(default_factory=lambda: ["ls", "pwd", "cat", "pytest"])
 
@@ -28,6 +30,8 @@ def load_settings() -> Settings:
         workspace_dir=os.getenv("WORKSPACE_DIR", "./workspace"),
         max_read_bytes=int(os.getenv("MAX_READ_BYTES", "65536")),
         openai_api_key=os.getenv("OPENAI_API_KEY"),
+        openai_keyring_service=os.getenv("OPENAI_KEYRING_SERVICE", "panchobot"),
+        openai_keyring_username=os.getenv("OPENAI_KEYRING_USERNAME", "openai"),
         openai_model=os.getenv("OPENAI_MODEL", "gpt-4o-mini"),
     )
 
