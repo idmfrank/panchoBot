@@ -10,6 +10,7 @@ from .ai.fake_client import FakeAIClient
 from .ai.openai_client import OpenAIClient
 from .config import ensure_directories, load_settings
 from .registry import RiskTier, Tool, ToolRegistry
+from .secrets import resolve_openai_api_key
 from .storage import Storage
 from .tools.shell import ShellArgs, ShellPolicy, ShellTool
 from .tools.workspace import ReadFileArgs, WorkspacePolicy, WorkspaceTools, WriteFileArgs, read_file_preview, write_file_preview
@@ -76,7 +77,8 @@ registry.register(
 )
 
 action_service = ActionService(storage, registry, settings.action_ttl_seconds, settings.approval_ttl_seconds)
-ai_client = OpenAIClient(settings.openai_api_key, settings.openai_model) if settings.openai_api_key else FakeAIClient()
+openai_api_key = resolve_openai_api_key(settings)
+ai_client = OpenAIClient(openai_api_key, settings.openai_model) if openai_api_key else FakeAIClient()
 planner = AgentPlanner(ai_client, action_service)
 
 app = FastAPI(title="PanchoBot MVP 0")
